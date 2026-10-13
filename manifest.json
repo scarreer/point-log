@@ -1,0 +1,13 @@
+{
+  "name": "Point Log",
+  "short_name": "Point Log",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#232721",
+  "theme_color": "#232721",
+  "icons": [
+    {"src": "icon.png", "sizes": "180x180", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

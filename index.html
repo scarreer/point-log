@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Point Log">
+<meta name="theme-color" content="#232721">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Point Log</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+/* Layout: one-screen field app — header, map or feed, bottom tab bar with a central log button. */
+:root{
+  --bg:#e6e5df; --surface:#f6f5f1; --ink:#22251f; --muted:#696b61; --line:#cbc9bf;
+  --accent:#2f5d50; --on-accent:#f6f5f1; --bar:#232721; --on-bar:#e9e7df;
+  --complete:#2e7d4f; --incomplete:#b7791f; --broken:#b23a2e;
+  --label:"Barlow Condensed",system-ui,sans-serif;
+  --body:"Source Serif 4",Georgia,serif;
+  --ui:system-ui,-apple-system,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#171a16; --surface:#22261f; --ink:#ebeae3; --muted:#9b9c91; --line:#373b31;
+  --accent:#86bba9; --on-accent:#141712; --bar:#0f110e; --on-bar:#e9e7df;
+  --complete:#5fbf86; --incomplete:#e0a74a; --broken:#e2675a;
+  color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--ui);display:flex;flex-direction:column;overflow:hidden;-webkit-tap-highlight-color:transparent}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+
+header{background:var(--bar);color:var(--on-bar);padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;display:flex;align-items:center;gap:12px}
+header h1{font:700 22px/1 var(--label);letter-spacing:.06em;text-transform:uppercase;margin:0;flex:1}
+header .count{font:500 14px var(--label);letter-spacing:.08em;text-transform:uppercase;opacity:.7}
+.ghost{background:none;border:1px solid color-mix(in srgb,var(--on-bar) 35%,transparent);color:var(--on-bar);border-radius:6px;padding:5px 10px;font:600 13px var(--label);letter-spacing:.08em;text-transform:uppercase}
+
+main{flex:1;position:relative;min-height:0}
+#map{position:absolute;inset:0;background:var(--line)}
+#feed{position:absolute;inset:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;-webkit-overflow-scrolling:touch}
+
+nav{background:var(--bar);color:var(--on-bar);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 16px calc(env(safe-area-inset-bottom,0px) + 8px)}
+.tab{background:none;border:0;color:var(--on-bar);opacity:.55;font:600 15px var(--label);letter-spacing:.1em;text-transform:uppercase;padding:10px}
+.tab[aria-pressed="true"]{opacity:1;box-shadow:inset 0 -2px 0 var(--accent)}
+#addBtn{background:var(--accent);color:var(--on-accent);border:0;border-radius:999px;padding:12px 22px;font:700 16px var(--label);letter-spacing:.08em;text-transform:uppercase;margin-top:-26px;box-shadow:0 4px 14px rgb(0 0 0 / .35)}
+
+/* condition chips */
+.chip{display:inline-flex;align-items:center;gap:6px;font:600 12px var(--label);letter-spacing:.1em;text-transform:uppercase;padding:3px 8px;border-radius:4px;color:#fff;background:var(--c)}
+.complete{--c:var(--complete)} .incomplete{--c:var(--incomplete)} .broken{--c:var(--broken)}
+
+/* feed cards */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;text-align:left;padding:0;display:block;width:100%}
+.card img,.card .nophoto{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--line)}
+.nophoto{display:grid!important;place-items:center;color:var(--muted);font:600 14px var(--label);letter-spacing:.1em;text-transform:uppercase}
+.card .body{padding:12px 14px 14px;display:grid;gap:6px;min-width:0}
+.card h3{margin:0;font:700 20px/1.1 var(--label);letter-spacing:.02em}
+.meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.desc{font:15px/1.5 var(--body);margin:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.empty{margin:auto;text-align:center;color:var(--muted);max-width:30ch;font:16px/1.5 var(--body)}
+
+/* overlays */
+.sheet{position:fixed;inset:0;z-index:1000;background:var(--bg);overflow-y:auto;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px calc(env(safe-area-inset-bottom,0px) + 24px)}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.sheet-head h2{margin:0;font:700 24px var(--label);letter-spacing:.04em;text-transform:uppercase}
+.link{background:none;border:0;color:var(--accent);font-weight:600;padding:8px 0}
+form{display:grid;gap:16px;max-width:560px;margin:0 auto}
+label.f{display:grid;gap:6px}
+.lbl{font:600 13px var(--label);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+input[type=text],input[type=date],textarea{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:11px 12px;font-size:16px}
+textarea{min-height:110px;resize:vertical;font-family:var(--body)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.photo-pick{display:grid;place-items:center;aspect-ratio:4/3;max-width:100%;border:1.5px dashed var(--line);border-radius:10px;background:var(--surface);color:var(--muted);overflow:hidden;font:600 15px var(--label);letter-spacing:.1em;text-transform:uppercase;position:relative}
+.photo-pick img{width:100%;height:100%;object-fit:cover}
+.photo-pick input{position:absolute;inset:0;opacity:0}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg label{text-align:center;padding:11px 4px;font:600 15px var(--label);letter-spacing:.06em;text-transform:uppercase;background:var(--surface);position:relative}
+.seg label+label{border-left:1px solid var(--line)}
+.seg input{position:absolute;opacity:0}
+.seg input:checked+span{color:#fff}
+.seg label:has(input:checked){background:var(--c)}
+.seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-3px}
+.loc{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px;display:grid;gap:10px}
+.coords{font:600 17px var(--label);letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.coords.none{color:var(--muted);font-weight:500}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.btn{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 14px;font:600 14px var(--label);letter-spacing:.08em;text-transform:uppercase}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);padding:13px 18px;font-size:16px}
+.btn.danger{color:var(--broken);border-color:color-mix(in srgb,var(--broken) 50%,var(--line))}
+.btn.danger.armed{background:var(--broken);color:#fff}
+.err{color:var(--broken);font-weight:600;margin:0}
+
+/* detail */
+.detail{max-width:560px;margin:0 auto;display:grid;gap:14px}
+.detail img{width:100%;border-radius:10px;display:block}
+.detail h2{margin:0;font:700 28px/1.05 var(--label);letter-spacing:.02em}
+.detail p.text{font:17px/1.6 var(--body);margin:0;white-space:pre-wrap}
+
+/* pick-on-map mode */
+#pickBar{position:absolute;left:16px;right:16px;bottom:16px;z-index:900;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:10px;box-shadow:0 6px 20px rgb(0 0 0 / .25)}
+#pickBar p{margin:0;font-size:14px}
+#cross{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;z-index:800;pointer-events:none}
+.mapbtn{position:absolute;right:10px;bottom:16px;z-index:700;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font:600 14px var(--label);letter-spacing:.08em;text-transform:uppercase}
+
+/* leaflet popups in theme */
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--surface);color:var(--ink)}
+.leaflet-popup-content{margin:10px;font:14px var(--ui)}
+.pop{display:grid;gap:6px;width:180px;text-align:left;background:none;border:0;padding:0}
+.pop img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px}
+.pop b{font:700 17px var(--label)}
+.pin{filter:drop-shadow(0 2px 2px rgb(0 0 0 / .5))}
+.me{width:16px;height:16px;border-radius:50%;background:#2a7de1;border:3px solid #fff;box-shadow:0 0 0 2px rgb(42 125 225 / .4)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Point Log</h1>
+  <span class="count" id="count"></span>
+  <button class="ghost" id="backupBtn">Backup</button>
+</header>
+
+<main>
+  <div id="map"></div>
+  <svg id="cross" hidden viewBox="0 0 44 44"><circle cx="22" cy="22" r="9" fill="none" stroke="#fff" stroke-width="4"/><circle cx="22" cy="22" r="9" fill="none" stroke="#b23a2e" stroke-width="2"/><path d="M22 0v12M22 32v12M0 22h12M32 22h12" stroke="#fff" stroke-width="4"/><path d="M22 0v12M22 32v12M0 22h12M32 22h12" stroke="#b23a2e" stroke-width="2"/></svg>
+  <button class="mapbtn" id="meBtn">My location</button>
+  <div id="pickBar" hidden>
+    <p>Drag the map until the crosshair sits on the spot you found it.</p>
+    <div class="btns"><button class="btn primary" id="pickSet">Set location here</button><button class="btn" id="pickCancel">Cancel</button></div>
+  </div>
+  <div id="feed" hidden></div>
+</main>
+
+<nav>
+  <button class="tab" id="tabMap" aria-pressed="true" style="justify-self:start">Map</button>
+  <button id="addBtn">+ Log find</button>
+  <button class="tab" id="tabFeed" aria-pressed="false" style="justify-self:end">Feed</button>
+</nav>
+
+<!-- add / edit -->
+<section class="sheet" id="editSheet" hidden>
+  <div class="sheet-head"><h2 id="editTitle">New find</h2><button class="link" id="editCancel">Cancel</button></div>
+  <form id="form" novalidate>
+    <label class="photo-pick" id="photoPick"><span id="photoHint">Add photo</span><input type="file" id="photo" accept="image/*"></label>
+    <div class="f"><span class="lbl">Condition</span>
+      <div class="seg">
+        <label class="complete"><input type="radio" name="cond" value="complete" checked><span>Complete</span></label>
+        <label class="incomplete"><input type="radio" name="cond" value="incomplete"><span>Incomplete</span></label>
+        <label class="broken"><input type="radio" name="cond" value="broken"><span>Broken</span></label>
+      </div>
+    </div>
+    <div class="row">
+      <label class="f"><span class="lbl">Type</span><input type="text" id="type" placeholder="e.g. Dalton"></label>
+      <label class="f"><span class="lbl">Material</span><input type="text" id="material" placeholder="e.g. chert"></label>
+    </div>
+    <label class="f"><span class="lbl">Date found</span><input type="date" id="date"></label>
+    <label class="f"><span class="lbl">Description</span><textarea id="desc" placeholder="Where it was lying, size, flaking, notching…"></textarea></label>
+    <div class="f"><span class="lbl">Location</span>
+      <div class="loc">
+        <div class="coords none" id="coords">No location yet</div>
+        <div class="btns"><button type="button" class="btn" id="gpsBtn">Use my location</button><button type="button" class="btn" id="pickBtn">Pick on map</button></div>
+      </div>
+    </div>
+    <p class="err" id="err" hidden></p>
+    <button class="btn primary" type="submit">Save find</button>
+  </form>
+</section>
+
+<!-- detail -->
+<section class="sheet" id="detailSheet" hidden>
+  <div class="sheet-head"><button class="link" id="detailClose">‹ Back</button><button class="link" id="detailEdit">Edit</button></div>
+  <div class="detail" id="detail"></div>
+</section>
+
+<!-- backup -->
+<section class="sheet" id="backupSheet" hidden>
+  <div class="sheet-head"><h2>Backup</h2><button class="link" id="backupClose">Done</button></div>
+  <div class="detail">
+    <p class="text">Finds are stored on this phone only. Export a backup file now and then (save it to Files or iCloud Drive) so you never lose your log. Import adds finds from a backup; finds you already have are kept.</p>
+    <div class="btns"><button class="btn primary" id="exportBtn">Export backup</button><label class="btn" style="position:relative">Import backup<input type="file" id="importFile" accept=".json,application/json" style="position:absolute;inset:0;opacity:0"></label></div>
+    <p class="meta" id="backupMsg"></p>
+  </div>
+</section>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const COND = {complete:'Complete', incomplete:'Incomplete', broken:'Broken'};
+const COLOR = {complete:'#2e7d4f', incomplete:'#c4861f', broken:'#b23a2e'};
+
+/* ---------- storage (IndexedDB: photos are Blobs, too big for localStorage) ---------- */
+let idb;
+const openDB = () => new Promise((res, rej) => {
+  const r = indexedDB.open('pointlog', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('finds', {keyPath: 'id'});
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+});
+const tx = (mode, fn) => new Promise((res, rej) => {
+  const t = idb.transaction('finds', mode), req = fn(t.objectStore('finds'));
+  t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error);
+});
+const dbAll = () => tx('readonly', s => s.getAll());
+const dbPut = f => tx('readwrite', s => s.put(f));
+const dbDel = id => tx('readwrite', s => s.delete(id));
+
+let finds = [], urls = {};
+const photoUrl = f => f.photo ? (urls[f.id] ||= URL.createObjectURL(f.photo)) : null;
+const title = f => f.type?.trim() || 'Unnamed point';
+const fmtDate = d => d ? new Date(d + 'T12:00').toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'}) : '';
+const fmtLL = (lat, lng) => `${Math.abs(lat).toFixed(5)}° ${lat>=0?'N':'S'}, ${Math.abs(lng).toFixed(5)}° ${lng>=0?'E':'W'}`;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------- map ---------- */
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19, attribution:'Imagery © Esri'});
+const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap'});
+const map = L.map('map', {layers:[sat], zoomControl:false}).setView([39.5, -98.35], 4);
+L.control.layers({'Satellite':sat, 'Street':street}, null, {position:'topright'}).addTo(map);
+const pins = L.layerGroup().addTo(map);
+let meMarker;
+
+const pinIcon = c => L.divIcon({className:'pin', iconSize:[26,36], iconAnchor:[13,36], popupAnchor:[0,-32],
+  html:`<svg width="26" height="36" viewBox="0 0 26 36"><path d="M13 1 L23 21 L22 26 L18 26 L16 29 L19 35 L7 35 L10 29 L8 26 L4 26 L3 21 Z" fill="${COLOR[c]}" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>`});
+
+function drawPins() {
+  pins.clearLayers();
+  for (const f of finds) {
+    const img = photoUrl(f);
+    L.marker([f.lat, f.lng], {icon: pinIcon(f.cond)}).addTo(pins).bindPopup(
+      `<button class="pop" onclick="openDetail('${f.id}')">${img ? `<img src="${img}" alt="">` : ''}<b>${esc(title(f))}</b><span class="chip ${f.cond}">${COND[f.cond]}</span><span class="meta">${fmtDate(f.date)} · tap for details</span></button>`);
+  }
+}
+
+function locate() {
+  return new Promise((res, rej) => {
+    if (!navigator.geolocation) return rej(new Error('This browser has no location access.'));
+    navigator.geolocation.getCurrentPosition(p => {
+      const ll = [p.coords.latitude, p.coords.longitude];
+      meMarker ? meMarker.setLatLng(ll) : (meMarker = L.marker(ll, {icon: L.divIcon({className:'', html:'<div class="me"></div>', iconSize:[16,16]}), interactive:false}).addTo(map));
+      res(p.coords);
+    }, e => rej(new Error(e.code === 1 ? 'Location is blocked. Allow it in Settings › Privacy › Location Services › Safari Websites.' : 'Couldn’t get a GPS fix. Try again or pick the spot on the map.')),
+    {enableHighAccuracy:true, timeout:15000, maximumAge:10000});
+  });
+}
+$('meBtn').onclick = () => locate().then(c => map.setView([c.latitude, c.longitude], 17)).catch(e => toastErr(e.message));
+function toastErr(m) { $('meBtn').textContent = 'Location unavailable'; setTimeout(() => $('meBtn').textContent = 'My location', 2500); console.warn(m); }
+
+/* ---------- views ---------- */
+function show(view) {
+  const isMap = view === 'map';
+  $('feed').hidden = isMap;
+  $('tabMap').setAttribute('aria-pressed', isMap); $('tabFeed').setAttribute('aria-pressed', !isMap);
+  if (isMap) setTimeout(() => map.invalidateSize(), 0);
+}
+$('tabMap').onclick = () => show('map');
+$('tabFeed').onclick = () => show('feed');
+
+function renderFeed() {
+  $('count').textContent = finds.length === 1 ? '1 find' : `${finds.length} finds`;
+  if (!finds.length) { $('feed').innerHTML = `<p class="empty">No finds logged yet. Tap <b>+ Log find</b> when you pick one up, and it will show here and on the map.</p>`; return; }
+  $('feed').innerHTML = finds.map(f => {
+    const img = photoUrl(f);
+    return `<button class="card" onclick="openDetail('${f.id}')">
+      ${img ? `<img src="${img}" alt="" loading="lazy">` : `<div class="nophoto">No photo</div>`}
+      <div class="body"><div><span class="chip ${f.cond}">${COND[f.cond]}</span></div>
+      <h3>${esc(title(f))}</h3>
+      <div class="meta">${[fmtDate(f.date), esc(f.material)].filter(Boolean).join(' · ')}</div>
+      ${f.desc ? `<p class="desc">${esc(f.desc)}</p>` : ''}</div></button>`;
+  }).join('');
+}
+
+async function reload() {
+  finds = (await dbAll()).sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.created - a.created);
+  renderFeed(); drawPins();
+}
+
+/* ---------- add / edit ---------- */
+let draft = null;
+function openEdit(f) {
+  draft = f ? {...f} : {id: crypto.randomUUID(), cond:'complete', date: new Date().toLocaleDateString('en-CA'), created: Date.now()};
+  $('editTitle').textContent = f ? 'Edit find' : 'New find';
+  fillForm();
+  $('editSheet').hidden = false; $('detailSheet').hidden = true;
+  if (!f) locate().then(c => { if (draft && draft.lat == null) { draft.lat = c.latitude; draft.lng = c.longitude; draft.acc = c.accuracy; showCoords(); } }).catch(() => {});
+}
+function fillForm() {
+  document.querySelector(`input[name=cond][value=${draft.cond}]`).checked = true;
+  $('type').value = draft.type || ''; $('material').value = draft.material || '';
+  $('date').value = draft.date || ''; $('desc').value = draft.desc || '';
+  $('photo').value = ''; $('err').hidden = true;
+  showPhoto(); showCoords();
+}
+function readForm() {
+  draft.cond = document.querySelector('input[name=cond]:checked').value;
+  draft.type = $('type').value.trim(); draft.material = $('material').value.trim();
+  draft.date = $('date').value; draft.desc = $('desc').value.trim();
+}
+function showPhoto() {
+  const old = $('photoPick').querySelector('img'); old && old.remove();
+  $('photoHint').hidden = !!draft.photo;
+  if (draft.photo) { const i = new Image(); i.src = URL.createObjectURL(draft.photo); i.alt = ''; $('photoPick').prepend(i); }
+}
+function showCoords() {
+  const el = $('coords'), has = draft.lat != null;
+  el.classList.toggle('none', !has);
+  el.textContent = has ? fmtLL(draft.lat, draft.lng) + (draft.acc ? `  (±${Math.round(draft.acc)} m)` : '') : 'No location yet';
+}
+
+// Shrink photos to 1600px so hundreds of finds fit comfortably on the phone.
+function shrink(file) {
+  return new Promise((res, rej) => {
+    const img = new Image(), u = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(u);
+      c.toBlob(b => b ? res(b) : rej(new Error('Couldn’t read that photo.')), 'image/jpeg', 0.85);
+    };
+    img.onerror = () => rej(new Error('That file isn’t a photo this phone can read.'));
+    img.src = u;
+  });
+}
+$('photo').onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try { draft.photo = await shrink(file); showPhoto(); } catch (x) { showErr(x.message); }
+};
+$('gpsBtn').onclick = async () => {
+  $('gpsBtn').textContent = 'Locating…';
+  try { const c = await locate(); draft.lat = c.latitude; draft.lng = c.longitude; draft.acc = c.accuracy; showCoords(); $('err').hidden = true; }
+  catch (x) { showErr(x.message); }
+  $('gpsBtn').textContent = 'Use my location';
+};
+$('pickBtn').onclick = () => {
+  readForm();
+  $('editSheet').hidden = true; show('map');
+  $('cross').hidden = $('pickBar').hidden = false; $('meBtn').hidden = true; map.closePopup();
+  if (draft.lat != null) map.setView([draft.lat, draft.lng], Math.max(map.getZoom(), 17));
+};
+function endPick() { $('cross').hidden = $('pickBar').hidden = true; $('meBtn').hidden = false; $('editSheet').hidden = false; }
+$('pickSet').onclick = () => { const c = map.getCenter(); draft.lat = c.lat; draft.lng = c.lng; draft.acc = null; endPick(); showCoords(); $('err').hidden = true; };
+$('pickCancel').onclick = endPick;
+$('editCancel').onclick = () => { draft = null; $('editSheet').hidden = true; };
+function showErr(m) { $('err').textContent = m; $('err').hidden = false; }
+
+$('form').onsubmit = async e => {
+  e.preventDefault(); readForm();
+  if (draft.lat == null) return showErr('Add a location: tap “Use my location” or “Pick on map”.');
+  try {
+    await dbPut(draft);
+    URL.revokeObjectURL(urls[draft.id]); delete urls[draft.id];
+    const id = draft.id; draft = null; $('editSheet').hidden = true;
+    await reload(); show('map'); map.setView([finds.find(f => f.id === id).lat, finds.find(f => f.id === id).lng], Math.max(map.getZoom(), 16));
+  } catch (x) { showErr('Couldn’t save. Your phone may be out of storage space.'); }
+};
+
+/* ---------- detail ---------- */
+let current = null;
+function openDetail(id) {
+  const f = current = finds.find(x => x.id === id); if (!f) return;
+  map.closePopup();
+  const img = photoUrl(f);
+  $('detail').innerHTML = `
+    ${img ? `<img src="${img}" alt="Photo of ${esc(title(f))}">` : ''}
+    <div><span class="chip ${f.cond}">${COND[f.cond]}</span></div>
+    <h2>${esc(title(f))}</h2>
+    <div class="meta">${[fmtDate(f.date), esc(f.material)].filter(Boolean).join(' · ')}</div>
+    ${f.desc ? `<p class="text">${esc(f.desc)}</p>` : ''}
+    <div class="loc"><div class="coords">${fmtLL(f.lat, f.lng)}</div>
+      <div class="btns"><button class="btn" id="dShow">Show on map</button><a class="btn" style="text-decoration:none;color:inherit" href="https://maps.apple.com/?ll=${f.lat},${f.lng}&q=${encodeURIComponent(title(f))}">Open in Maps</a></div></div>
+    <div class="btns"><button class="btn danger" id="dDel">Delete find</button></div>`;
+  $('detailSheet').hidden = false; $('detailSheet').scrollTop = 0;
+  $('dShow').onclick = () => { $('detailSheet').hidden = true; show('map'); map.setView([f.lat, f.lng], 18); };
+  $('dDel').onclick = async e => {
+    const b = e.currentTarget;
+    if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Tap again to delete for good'; return; }
+    await dbDel(f.id); URL.revokeObjectURL(urls[f.id]); delete urls[f.id];
+    $('detailSheet').hidden = true; reload();
+  };
+}
+$('detailClose').onclick = () => $('detailSheet').hidden = true;
+$('detailEdit').onclick = () => openEdit(current);
+$('addBtn').onclick = () => openEdit(null);
+
+/* ---------- backup ---------- */
+const toDataURL = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+$('backupBtn').onclick = () => { $('backupMsg').textContent = ''; $('backupSheet').hidden = false; };
+$('backupClose').onclick = () => $('backupSheet').hidden = true;
+$('exportBtn').onclick = async () => {
+  const out = [];
+  for (const f of finds) out.push({...f, photo: f.photo ? await toDataURL(f.photo) : null});
+  const name = `point-log-${new Date().toLocaleDateString('en-CA')}.json`;
+  const file = new File([JSON.stringify({app:'pointlog', v:1, finds:out})], name, {type:'application/json'});
+  try {
+    if (navigator.canShare?.({files:[file]})) await navigator.share({files:[file], title:name});
+    else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; a.click(); }
+    $('backupMsg').textContent = `Exported ${out.length} finds.`;
+  } catch (x) { if (x.name !== 'AbortError') $('backupMsg').textContent = 'Export didn’t finish. Try again.'; }
+};
+$('importFile').onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (data.app !== 'pointlog') throw 0;
+    const have = new Set(finds.map(f => f.id)); let n = 0;
+    for (const f of data.finds) {
+      if (have.has(f.id)) continue;
+      if (f.photo) f.photo = await (await fetch(f.photo)).blob();
+      await dbPut(f); n++;
+    }
+    await reload(); $('backupMsg').textContent = `Imported ${n} new finds.`;
+  } catch { $('backupMsg').textContent = 'That file isn’t a Point Log backup.'; }
+  e.target.value = '';
+};
+
+/* ---------- start ---------- */
+(async () => {
+  idb = await openDB();
+  navigator.storage?.persist?.();
+  await reload();
+  if (finds.length) map.fitBounds(finds.map(f => [f.lat, f.lng]), {padding:[40,40], maxZoom:16});
+  else locate().then(c => map.setView([c.latitude, c.longitude], 15)).catch(() => {});
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
